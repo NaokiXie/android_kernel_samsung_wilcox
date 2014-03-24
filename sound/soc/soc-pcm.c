@@ -15,7 +15,7 @@
  *  option) any later version.
  *
  */
- 
+
 #if (defined(CONFIG_MACH_MELIUS_SKT) || defined(CONFIG_MACH_MELIUS_KTT) || \
 	defined(CONFIG_MACH_MELIUS_LGT))
 #define DEBUG
@@ -472,11 +472,12 @@ static int soc_pcm_close(struct snd_pcm_substream *substream)
 
 	/* Muting the DAC suppresses artifacts caused during digital
 	 * shutdown, for example from stopping clocks.
-	 * Always call Mute for Codec Dai irrespective of Stream type. 	 
+	 *
+	 * Always call Mute for Codec Dai irrespective of Stream type.
 	 */
 #ifndef CONFIG_WCD9304_CODEC
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-#endif	
+ 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+#endif
 		snd_soc_dai_digital_mute(codec_dai, 1);
 
 	if (cpu_dai->driver->ops->shutdown)
@@ -865,11 +866,8 @@ static inline int be_connect(struct snd_soc_pcm_runtime *fe,
 	be->dpcm[stream].runtime = fe->dpcm[stream].runtime;
 	dpcm_params->state = SND_SOC_DPCM_LINK_STATE_NEW;
 
-	pr_debug("be connect list add be_clients");
 	list_add(&dpcm_params->list_be, &fe->dpcm[stream].be_clients);
-	pr_debug("be connect list add");
 	list_add(&dpcm_params->list_fe, &be->dpcm[stream].fe_clients);
-	pr_debug("be connect list add fe_clients");
 
 	dev_dbg(fe->dev, "  connected new DSP %s path %s %s %s\n",
 			stream ? "capture" : "playback",  fe->dai_link->name,
@@ -932,11 +930,8 @@ static inline void be_disconnect(struct snd_soc_pcm_runtime *fe, int stream)
 			debugfs_remove(dpcm_params->debugfs_state);
 #endif
 
-			pr_debug("be disconnect list del list_be");
 			list_del(&dpcm_params->list_be);
-			pr_debug("be disconnect list del");
 			list_del(&dpcm_params->list_fe);
-			pr_debug("be disconnect list del list_fe");
 			kfree(dpcm_params);
 		}
 	}
@@ -1782,7 +1777,7 @@ static int soc_dpcm_be_dai_hw_free(struct snd_soc_pcm_runtime *fe, int stream)
 		if ((be->dpcm[stream].state != SND_SOC_DPCM_STATE_HW_PARAMS) &&
 		    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_PREPARE) &&
 			(be->dpcm[stream].state != SND_SOC_DPCM_STATE_HW_FREE) &&
-			(be->dpcm[stream].state != SND_SOC_DPCM_STATE_PAUSED) &&
+		    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_PAUSED) &&
 			(be->dpcm[stream].state != SND_SOC_DPCM_STATE_STOP)
 #if (defined(CONFIG_MACH_BAFFIN) || defined(CONFIG_MACH_MELIUS_SKT) || \
 defined(CONFIG_MACH_MELIUS_KTT) || defined(CONFIG_MACH_MELIUS_LGT))

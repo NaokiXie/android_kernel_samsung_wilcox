@@ -24,6 +24,7 @@
 #include <sound/pcm.h>
 #include <sound/initval.h>
 #include <sound/control.h>
+#include <sound/pcm_params.h>
 #include <asm/dma.h>
 #include <linux/dma-mapping.h>
 #include <linux/android_pmem.h>
@@ -341,7 +342,9 @@ int lpa_set_volume(unsigned volume)
 {
 	int rc = 0;
 	if (lpa_audio.prtd && lpa_audio.prtd->audio_client) {
-		rc = q6asm_set_volume(lpa_audio.prtd->audio_client, volume);
+		rc = q6asm_set_lrgain(lpa_audio.prtd->audio_client,
+						(volume >> 16) & 0xFFFF,
+						volume & 0xFFFF);
 		if (rc < 0) {
 			pr_err("%s: Send Volume command failed rc=%d\n",
 					__func__, rc);
@@ -461,8 +464,8 @@ static int msm_pcm_hw_params(struct snd_pcm_substream *substream,
 		return -EPERM;
 	ret = q6asm_audio_client_buf_alloc_contiguous(dir,
 			prtd->audio_client,
-			runtime->hw.period_bytes_min,
-			runtime->hw.periods_max);
+			params_period_bytes(params),
+			params_periods(params));
 	if (ret < 0) {
 		pr_err("Audio Start: Buffer Allocation failed rc = %d\n",
 						ret);
@@ -479,7 +482,7 @@ static int msm_pcm_hw_params(struct snd_pcm_substream *substream,
 	dma_buf->private_data = NULL;
 	dma_buf->area = buf[0].data;
 	dma_buf->addr =  buf[0].phys;
-	dma_buf->bytes = runtime->hw.buffer_bytes_max;
+	dma_buf->bytes = params_period_bytes(params) * params_periods(params);
 	if (!dma_buf->area)
 		return -ENOMEM;
 

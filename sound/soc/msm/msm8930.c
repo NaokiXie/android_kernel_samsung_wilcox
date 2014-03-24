@@ -33,6 +33,7 @@
 #include <asm/mach-types.h>
 #include <mach/socinfo.h>
 #include <linux/mfd/pm8xxx/pm8038.h>
+#include <linux/input.h>
 #include "msm-pcm-routing.h"
 #include "../codecs/wcd9304.h"
 #include <mach/msm8930-gpio.h>
@@ -190,18 +191,13 @@ static struct ext_amp_work ext_amp_dwork;
 static void external_speaker_amp_work(struct work_struct *work)
 {
 	pr_debug("%s :: Ext Speaker Amp enable\n", __func__);
-	
-	if (msm8930_ext_spk_pamp == 0)
-		pr_debug("%s :: Ext Speaker Amp enable but msm8930_ext_spk_pamp is already 0\n", __func__);
-	else {
 #ifdef CONFIG_EXT_SPK_AMP
-		gpio_direction_output(GPIO_SPK_AMP_EN, 1);
+	gpio_direction_output(GPIO_SPK_AMP_EN, 1);
 #else
-		pm8xxx_spk_enable(MSM8930_SPK_ON);
+	pm8xxx_spk_enable(MSM8930_SPK_ON);
 #endif
-		pr_debug("4 ms after turning on external Amp\n");
-		usleep_range(4000, 4000);
-	}
+	pr_debug("4 ms after turning on external Amp\n");
+	usleep_range(4000, 4000);
 }
 #if defined (CONFIG_WCD9304_CLK_9600)
 static struct device mi2s_dev = {
@@ -1094,7 +1090,7 @@ end:
 
 static int msm8930_audrx_init(struct snd_soc_pcm_runtime *rtd)
 {
-	int err;
+	int err, ret;
 	struct snd_soc_codec *codec = rtd->codec;
 	struct snd_soc_dapm_context *dapm = &codec->dapm;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
@@ -1130,6 +1126,15 @@ static int msm8930_audrx_init(struct snd_soc_pcm_runtime *rtd)
 		pr_err("failed to create new jack\n");
 		return err;
 	}
+
+	ret = snd_jack_set_key(button_jack.jack,
+			       SND_JACK_BTN_0,
+			       KEY_MEDIA);
+	if (ret) {
+		pr_err("%s: Failed to set code for btn-0\n", __func__);
+		return err;
+	}
+
 	codec_clk = clk_get(cpu_dai->dev, "osr_clk");
 	
 	pr_debug("%s: codec name is %s codec_clk = %p",
