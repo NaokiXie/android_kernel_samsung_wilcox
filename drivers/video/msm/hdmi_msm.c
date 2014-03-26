@@ -91,6 +91,7 @@ static bool hdmi_msm_cable_connected(void);
 #ifdef CONFIG_SAMSUNG_HDMI_OFF_WORKAROUND
 extern boolean  mdp_shutdown_check_for_hdmi;
 #endif
+
 /* Enable HDCP by default */
 static bool hdcp_feature_on = true;
 
@@ -2914,8 +2915,7 @@ static int hdcp_authentication_part2(void)
 			}
 			if (!timeout_count) {
 				ret = -ETIMEDOUT;
-				DEV_ERR("%s: (%d): timedout\n",
-						__func__, __LINE__);
+				DEV_ERR("%s(%d): timedout", __func__, __LINE__);
 				goto error;
 			}
 		}

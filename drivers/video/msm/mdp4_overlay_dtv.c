@@ -115,6 +115,27 @@ static void vsync_irq_disable(int intr, int term)
 	pr_debug("%s: IRQ-dis done, term=%x\n", __func__, term);
 }
 
+void mdp4_dtv_free_base_pipe(struct msm_fb_data_type *mfd)
+{
+	struct vsycn_ctrl *vctrl;
+	struct mdp4_overlay_pipe *pipe;
+
+	vctrl = &vsync_ctrl_db[0];
+	pipe = vctrl->base_pipe;
+
+	if (pipe == NULL)
+		return ;
+
+	if (hdmi_prim_display) {
+		/* adb stop */
+		if (pipe->pipe_type == OVERLAY_TYPE_BF)
+			mdp4_overlay_borderfill_stage_down(pipe);
+
+		/* pipe == rgb2 */
+		vctrl->base_pipe = NULL;
+	}
+}
+
 void mdp4_overlay_dtv_start(void)
 {
 	if (!dtv_enabled) {
@@ -406,7 +427,6 @@ ssize_t mdp4_dtv_show_event(struct device *dev,
 		!external_common_state->hpd_state ||
 		atomic_read(&vctrl->vsync_resume) == 0)
 		return 0;
-
 	/*
 	 * show_event thread keep spinning on vctrl->vsync_comp
 	 * race condition on x.done if multiple thread blocked
@@ -711,11 +731,11 @@ int mdp4_dtv_off(struct platform_device *pdev)
 	int mixer = 0;
 
 	mfd = (struct msm_fb_data_type *)platform_get_drvdata(pdev);
-
+	
 #if defined(CONFIG_VIDEO_MHL_V2)
 			if (hdmi_msm_state->hpd_on_offline) {
 					pr_info("hpd_offline is not\n");
-			/*		return -ENODEV;	*/
+					return -ENODEV;
 			}
 #endif
 
@@ -724,9 +744,9 @@ int mdp4_dtv_off(struct platform_device *pdev)
 	vctrl = &vsync_ctrl_db[cndx];
 
 
-	mdp4_dtv_wait4vsync(cndx);
-
 	atomic_set(&vctrl->vsync_resume, 0);
+
+	mdp4_dtv_wait4vsync(cndx);
 
 	complete_all(&vctrl->vsync_comp);
 	vctrl->wait_vsync_cnt = 0;
@@ -986,6 +1006,7 @@ void mdp4_external_vsync_dtv(void)
 
 	complete_all(&vctrl->vsync_comp);
 	vctrl->wait_vsync_cnt = 0;
+
 	spin_unlock(&vctrl->spin_lock);
 }
 

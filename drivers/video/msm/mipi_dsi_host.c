@@ -56,6 +56,7 @@ static struct mutex clk_mutex;
 
 static struct list_head pre_kickoff_list;
 static struct list_head post_kickoff_list;
+struct work_struct mdp_reset_work;
 
 #if defined(CONFIG_RUNTIME_MIPI_CLK_CHANGE) || defined(CONFIG_FB_MSM_CAMERA_CSC)
 static struct mutex dsi_vsync_mutex;
@@ -97,6 +98,11 @@ void mipi_dsi_mdp_stat_inc(int which)
 }
 #endif
 
+static void mdp_reset_wq_handler(struct work_struct *work)
+{
+	mdp4_mixer_reset(0);
+}
+
 void mipi_dsi_init(void)
 {
 	init_completion(&dsi_dma_comp);
@@ -109,6 +115,7 @@ void mipi_dsi_init(void)
 	spin_lock_init(&dsi_clk_lock);
 	mutex_init(&cmd_mutex);
 	mutex_init(&clk_mutex);
+	INIT_WORK(&mdp_reset_work, mdp_reset_wq_handler);
 
 	INIT_LIST_HEAD(&pre_kickoff_list);
 	INIT_LIST_HEAD(&post_kickoff_list);
@@ -186,7 +193,7 @@ void mipi_dsi_clk_cfg(int on)
 	mutex_lock(&clk_mutex);
 	if (on) {
 		if (dsi_clk_cnt == 0) {
-			mipi_dsi_prepare_clocks();
+			mipi_dsi_prepare_ahb_clocks();
 			mipi_dsi_ahb_ctrl(1);
 			mipi_dsi_clk_enable();
 		}
@@ -196,8 +203,9 @@ void mipi_dsi_clk_cfg(int on)
 			dsi_clk_cnt--;
 			if (dsi_clk_cnt == 0) {
 				mipi_dsi_clk_disable();
-				mipi_dsi_ahb_ctrl(0);
 				mipi_dsi_unprepare_clocks();
+				mipi_dsi_ahb_ctrl(0);
+				mipi_dsi_unprepare_ahb_clocks();
 			}
 		}
 	}
@@ -208,6 +216,7 @@ void mipi_dsi_clk_cfg(int on)
 
 void mipi_dsi_turn_on_clks(void)
 {
+	mipi_dsi_prepare_ahb_clocks();
 	mipi_dsi_ahb_ctrl(1);
 	mipi_dsi_clk_enable();
 }
@@ -215,7 +224,9 @@ void mipi_dsi_turn_on_clks(void)
 void mipi_dsi_turn_off_clks(void)
 {
 	mipi_dsi_clk_disable();
+	mipi_dsi_unprepare_clocks();
 	mipi_dsi_ahb_ctrl(0);
+	mipi_dsi_unprepare_ahb_clocks();
 }
 
 static void mipi_dsi_action(struct list_head *act_list)
@@ -2041,9 +2052,7 @@ void mipi_dsi_cmd_mdp_busy(void)
 		/* wait until DMA finishes the current job */
 		pr_debug("%s: pending pid=%d\n",
 				__func__, current->pid);
-		if (!wait_for_completion_timeout(&dsi_mdp_comp, msecs_to_jiffies(100))) {
-			pr_err("%s: mdp timeout error\n", __func__);
-		}
+		wait_for_completion(&dsi_mdp_comp);
 	}
 	pr_debug("%s: done pid=%d\n",
 				__func__, current->pid);
@@ -2206,6 +2215,11 @@ void mipi_dsi_ack_err_status(void)
 
 	if (status) {
 		MIPI_OUTP(MIPI_DSI_BASE + 0x0064, status);
+		/*
+		 * base on hw enginner, write an extra 0 needed
+		 * to clear error bits
+		 */
+		MIPI_OUTP(MIPI_DSI_BASE + 0x0064, ~status);
 		pr_debug("%s: status=%x\n", __func__, status);
 	}
 }
@@ -2243,7 +2257,7 @@ void mipi_dsi_fifo_status(void)
 		MIPI_OUTP(MIPI_DSI_BASE + 0x0008, status);
 		pr_err("%s: Error: status=%x\n", __func__, status);
 		mipi_dsi_sw_reset();
-		mdp4_mixer_reset(0);
+		schedule_work(&mdp_reset_work);
 	}
 }
 
@@ -2282,11 +2296,17 @@ int mipi_runtime_clk_change(int fps)
 	goal_fps = fps;
 		
 	INIT_COMPLETION(dsi_vsync_comp);
+#ifdef CONFIG_FB_MSM_MIPI_NT35510_CMD_WVGA_PT_PANEL
+	mipi_dsi_enable_irq(DSI_MDP_TERM);
+	mipi_dsi_irq_set(DSI_INTR_CMD_MDP_DONE_MASK,
+					DSI_INTR_CMD_MDP_DONE_MASK);
+#else
 	mipi_dsi_enable_irq(DSI_VIDEO_TERM);
 	mipi_dsi_irq_set(DSI_INTR_VIDEO_DONE_MASK,
 					DSI_INTR_VIDEO_DONE_MASK);
+#endif
 
-	rc = wait_for_completion_timeout(&dsi_vsync_comp, 2 * HZ);
+	rc = wait_for_completion_timeout(&dsi_vsync_comp, 5 * HZ);
 
 	if (!rc) {
 		pr_err("%s: dma timeout error\n", __func__);
@@ -2307,12 +2327,7 @@ int mipi_runtime_csc_update(uint32_t reg[][2], int length)
 {
 	int rc;
 	int loop;
-	struct msm_fb_data_type *mfd;
-	mfd = (struct msm_fb_data_type *)registered_fb[0]->par;
-	if(mfd->panel_power_on == false){
-		pr_info("panel is off, no csc update\n");
-		return 0;
-	}
+
 	mutex_lock(&dsi_vsync_mutex);
 
 	csc_length = length;
@@ -2323,18 +2338,11 @@ int mipi_runtime_csc_update(uint32_t reg[][2], int length)
 	}
 
 	INIT_COMPLETION(dsi_vsync_comp);
-#ifdef CONFIG_FB_MSM_MIPI_NT35510_CMD_WVGA_PT_PANEL
-	mipi_dsi_enable_irq(DSI_MDP_TERM);
-	mipi_dsi_irq_set(DSI_INTR_CMD_MDP_DONE_MASK,
-					DSI_INTR_CMD_MDP_DONE_MASK);
-	rc = wait_for_completion_timeout(&dsi_vsync_comp, 1 * HZ);
-#else
 	mipi_dsi_enable_irq(DSI_VIDEO_TERM);
 	mipi_dsi_irq_set(DSI_INTR_VIDEO_DONE_MASK,
 					DSI_INTR_VIDEO_DONE_MASK);
-	rc = wait_for_completion_timeout(&dsi_vsync_comp, 5 * HZ);
-#endif
 
+	rc = wait_for_completion_timeout(&dsi_vsync_comp, 2 * HZ);
 
 	if (!rc) {
 		pr_err("%s: dma timeout error\n", __func__);
@@ -2375,7 +2383,6 @@ irqreturn_t mipi_dsi_isr(int irq, void *ptr)
 		if (runtime_clk_chagne) {
 			if (inpdw(MDP_BASE+0x90014)) {
 				pr_debug("%s VIDEO_ENGINE BUSY", __func__);
-				
 			} else {
 				mipi_dsi_configure_dividers(goal_fps);
 				runtime_clk_chagne = 0;
@@ -2486,11 +2493,14 @@ irqreturn_t mipi_dsi_isr(int irq, void *ptr)
 			int loop = 0;
 			for (loop = 0; loop < csc_length; loop++) {
 				outpdw(csc_reg[loop][0], csc_reg[loop][1]);
+				pr_debug("%s 0x%x 0x%x ", __func__, csc_reg[loop][0], csc_reg[loop][1]);
 			}
 			csc_updated = 0;
 			mipi_dsi_mdp_stat_inc(STAT_DSI_MDP);
 			mipi_dsi_disable_irq_nosync(DSI_MDP_TERM);
 			complete(&dsi_vsync_comp);
+			pr_info("%s CSC update done \n", __func__);
+			pr_debug("%s VIDEO_ENGINE NOT BUSY", __func__);
 
 			spin_lock(&dsi_mdp_lock);
 			dsi_ctrl_lock = FALSE;

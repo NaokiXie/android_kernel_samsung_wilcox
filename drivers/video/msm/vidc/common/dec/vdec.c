@@ -706,20 +706,21 @@ static u32 vid_dec_set_turbo_clk(struct video_client_ctx *client_ctx)
 {
 	struct vcd_property_hdr vcd_property_hdr;
 	u32 vcd_status = VCD_ERR_FAIL;
-	u32 dummy = 0;
+	struct vcd_property_perf_level perf_level;
+	perf_level.level = VCD_PERF_LEVEL_TURBO;
 
 	if (!client_ctx)
 		return false;
-	vcd_property_hdr.prop_id = VCD_I_SET_TURBO_CLK;
-	vcd_property_hdr.sz = sizeof(struct vcd_property_frame_size);
-
+	vcd_property_hdr.prop_id = VCD_REQ_PERF_LEVEL;
+	vcd_property_hdr.sz = sizeof(struct vcd_property_perf_level);
 	vcd_status = vcd_set_property(client_ctx->vcd_handle,
-				      &vcd_property_hdr, &dummy);
-
-	if (vcd_status)
+				      &vcd_property_hdr, &perf_level);
+	if (vcd_status) {
+		ERR("%s: set turbo perf_level failed", __func__);
 		return false;
-	else
+	} else {
 		return true;
+	}
 }
 
 static u32 vid_dec_get_frame_resolution(struct video_client_ctx *client_ctx,
@@ -1650,17 +1651,20 @@ static u32 vid_dec_decode_frame(struct video_client_ctx *client_ctx,
 {
 	struct vcd_frame_data vcd_input_buffer;
 	unsigned long kernel_vaddr, phy_addr, user_vaddr;
+	struct buf_addr_table *buf_addr_table;
 	int pmem_fd;
 	struct file *file;
 	s32 buffer_index = -1;
 	u32 vcd_status = VCD_ERR_FAIL;
 	u32 ion_flag = 0;
+	unsigned long buff_len;
 	struct ion_handle *buff_handle = NULL;
 
 	if (!client_ctx || !input_frame_info)
 		return false;
 
 	user_vaddr = (unsigned long)input_frame_info->bufferaddr;
+	buf_addr_table = client_ctx->input_buf_addr_table;
 
 	if (vidc_lookup_addr_table(client_ctx, BUFFER_TYPE_INPUT,
 				      true, &user_vaddr, &kernel_vaddr,
@@ -1670,6 +1674,17 @@ static u32 vid_dec_decode_frame(struct video_client_ctx *client_ctx,
 		/* kernel_vaddr  is found. send the frame to VCD */
 		memset((void *)&vcd_input_buffer, 0,
 		       sizeof(struct vcd_frame_data));
+
+		buff_len = buf_addr_table[buffer_index].buff_len;
+		if ((input_frame_info->datalen > buff_len) ||
+					(input_frame_info->offset > buff_len)) {
+			ERR("%s(): offset(%u) or data length(%u) is greater"\
+				" than buffer length(%lu)\n",\
+			__func__, input_frame_info->offset,
+			input_frame_info->datalen, buff_len);
+			return false;
+		}
+
 		vcd_input_buffer.virtual =
 		    (u8 *) (kernel_vaddr + input_frame_info->pmem_offset);
 		vcd_input_buffer.offset = input_frame_info->offset;
@@ -1964,6 +1979,19 @@ static long vid_dec_ioctl(struct file *file,
 		buffer_req.max_count = vdec_buf_req.maxcount;
 		buffer_req.min_count = vdec_buf_req.mincount;
 		buffer_req.sz = vdec_buf_req.buffer_size;
+		buffer_req.buf_pool_id = vdec_buf_req.buf_poolid;
+		buffer_req.meta_buffer_size = vdec_buf_req.meta_buffer_size;
+		DBG("SET_BUF_REQ: port = %u, min = %u, max = %u, "\
+			"act = %u, size = %u, align = %u, pool = %u, "\
+			"meta_buf_size = %u",
+			(u32)vdec_buf_req.buffer_type,
+			(u32)buffer_req.min_count,
+			(u32)buffer_req.max_count,
+			(u32)buffer_req.actual_count,
+			(u32)buffer_req.sz,
+			(u32)buffer_req.align,
+			(u32)buffer_req.buf_pool_id,
+			(u32)buffer_req.meta_buffer_size);
 
 		switch (vdec_buf_req.buffer_type) {
 		case VDEC_BUFFER_TYPE_INPUT:
@@ -1996,8 +2024,19 @@ static long vid_dec_ioctl(struct file *file,
 			return -EFAULT;
 
 		result = vid_dec_get_buffer_req(client_ctx, &vdec_buf_req);
-
 		if (result) {
+			DBG("GET_BUF_REQ: port = %u, min = %u, "\
+				"max = %u, act = %u, size = %u, "\
+				"align = %u, pool = %u, "\
+				"meta_buf_size = %u",
+				(u32)vdec_buf_req.buffer_type,
+				(u32)vdec_buf_req.mincount,
+				(u32)vdec_buf_req.maxcount,
+				(u32)vdec_buf_req.actualcount,
+				(u32)vdec_buf_req.buffer_size,
+				(u32)vdec_buf_req.alignment,
+				(u32)vdec_buf_req.buf_poolid,
+				(u32)vdec_buf_req.meta_buffer_size);
 			if (copy_to_user(vdec_msg.out, &vdec_buf_req,
 					sizeof(vdec_buf_req)))
 				return -EFAULT;
@@ -2838,8 +2877,8 @@ static int __init vid_dec_init(void)
 			goto error_vid_dec_cdev_add;
 		}
 	}
-	vid_dec_vcd_init();
-	return 0;
+	rc = vid_dec_vcd_init();
+	return rc;
 
 error_vid_dec_cdev_add:
 	for (j = i-1; j >= 0; j--)

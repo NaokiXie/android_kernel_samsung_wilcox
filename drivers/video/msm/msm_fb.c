@@ -69,8 +69,8 @@ static boolean bf_supported;
  * pan display on the panel. This is to avoid panel specific
  * transients during resume.
 */
-unsigned long first_backlight_duration = 150;     // booting time 1500ms
-unsigned long backlight_duration = 30;             // wakeup time  300ms
+unsigned long first_backlight_duration = 100;     // booting time 50ms
+unsigned long backlight_duration = 30;             // wakeup time 30ms
 static unsigned int recovery_boot_mode;
 extern int poweroff_charging;
 #endif
@@ -298,6 +298,9 @@ static ssize_t msm_fb_fps_level_change(struct device *dev,
 	unsigned long val;
 	int ret;
 
+	if (mfd->panel.type != MIPI_VIDEO_PANEL)
+		return -EINVAL;
+
 	ret = kstrtoul(buf, 10, &val);
 	if (ret)
 		return ret;
@@ -364,7 +367,7 @@ static ssize_t msm_fb_msm_fb_type(struct device *dev,
 }
 
 static DEVICE_ATTR(msm_fb_type, S_IRUGO, msm_fb_msm_fb_type, NULL);
-static DEVICE_ATTR(msm_fb_fps_level, S_IRUGO | S_IWUGO, NULL, \
+static DEVICE_ATTR(msm_fb_fps_level, S_IRUGO | S_IWUSR | S_IWGRP, NULL, \
 				msm_fb_fps_level_change);
 static struct attribute *msm_fb_attrs[] = {
 	&dev_attr_msm_fb_type.attr,
@@ -1037,7 +1040,7 @@ static int msm_fb_blank_sub(int blank_mode, struct fb_info *info,
 						schedule_delayed_work(&mfd->backlight_worker,
 									first_backlight_duration);				
 				}
-#endif				
+#endif
 			}
 		}
 #ifdef CONFIG_DUAL_LCD
@@ -1066,7 +1069,7 @@ static int msm_fb_blank_sub(int blank_mode, struct fb_info *info,
 			curr_pwr_state = mfd->panel_power_on;
 #ifdef CONFIG_BACKLIGHT_WORKQUEUE
 			down(&mfd->sem);
-#endif			
+#endif
 			mfd->panel_power_on = FALSE;
 #ifdef CONFIG_BACKLIGHT_WORKQUEUE
 			bl_updated = 0;
@@ -1076,6 +1079,7 @@ static int msm_fb_blank_sub(int blank_mode, struct fb_info *info,
 			if (mfd->msmfb_no_update_notify_timer.function)
 				del_timer(&mfd->msmfb_no_update_notify_timer);
 			complete(&mfd->msmfb_no_update_notify);
+
 #ifndef CONFIG_BACKLIGHT_WORKQUEUE
 			bl_updated = 0;
 #endif
@@ -1213,10 +1217,11 @@ static int msm_fb_blank(int blank_mode, struct fb_info *info)
 		if (blank_mode == FB_BLANK_UNBLANK) {
 			mfd->suspend.panel_power_on = TRUE;
 			/* if unblank is called when system is in suspend,
-			do not unblank but send SUCCESS to hwc, so that hwc
-			keeps pushing frames and display comes up as soon
-			 as system is resumed */
-			return 0;
+			wait for the system to resume */
+			while (mfd->suspend.op_suspend) {
+				pr_debug("waiting for system to resume\n");
+				msleep(20);
+			}
 		}
 		else
 			mfd->suspend.panel_power_on = FALSE;
@@ -1257,6 +1262,7 @@ static int msm_fb_mmap(struct fb_info *info, struct vm_area_struct * vma)
 		return -EINVAL;
 
 	msm_fb_pan_idle(mfd);
+
 	/* Set VM flags. */
 	start &= PAGE_MASK;
 	off += start;
@@ -1872,6 +1878,14 @@ static int msm_fb_open(struct fb_info *info, int user)
 	
 
 	if (mfd->op_enable == 0) {
+		if (!mfd->ref_cnt && info->node == 2)
+			return -EPERM;
+		/* if system is in suspend mode, do not unblank */
+		mfd->ref_cnt++;
+		return 0;
+	}
+
+	if (mfd->op_enable == 0) {
 		/* if system is in suspend mode, do not unblank */
 		mfd->ref_cnt++;
 		return 0;
@@ -1900,6 +1914,11 @@ static int msm_fb_open(struct fb_info *info, int user)
 	return 0;
 }
 
+static void msm_fb_free_base_pipe(struct msm_fb_data_type *mfd)
+{
+	return 	mdp4_overlay_free_base_pipe(mfd);
+}
+
 static int msm_fb_release(struct fb_info *info, int user)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
@@ -1913,12 +1932,16 @@ static int msm_fb_release(struct fb_info *info, int user)
 	msm_fb_pan_idle(mfd);
 	mfd->ref_cnt--;
 
-	if ((!mfd->ref_cnt) && (mfd->op_enable)) {
-		if ((ret =
-		     msm_fb_blank_sub(FB_BLANK_POWERDOWN, info,
-				      mfd->op_enable)) != 0) {
-			printk(KERN_ERR "msm_fb_release: can't turn off display!\n");
-			return ret;
+	if (!mfd->ref_cnt) {
+		if (mfd->op_enable) {
+			ret = msm_fb_blank_sub(FB_BLANK_POWERDOWN, info,
+							mfd->op_enable);
+			if (ret != 0) {
+				printk(KERN_ERR "msm_fb_release: can't turn off display!\n");
+				return ret;
+			}
+		} else {
+			msm_fb_free_base_pipe(mfd);
 		}
 	}
 
@@ -2016,12 +2039,17 @@ static int msm_fb_pan_display_ex(struct fb_info *info,
 	struct fb_var_screeninfo *var = &disp_commit->var;
 	u32 wait_for_finish = disp_commit->wait_for_finish;
 	int ret = 0;
-
 	if (disp_commit->flags &
 		MDP_DISPLAY_COMMIT_OVERLAY) {
 		if (!mfd->panel_power_on) /* suspended */
 			return -EPERM;
 	} else {
+	        /*
+                WFD panel info was not getting updated,
+		in case of resolution other than 1280x720
+                */
+                mfd->var_xres = info->var.xres;
+                mfd->var_yres = info->var.yres;
 		/*
 		 * If framebuffer is 2, io pan display is not allowed.
 		 */
@@ -2253,7 +2281,6 @@ static void msm_fb_commit_wq_handler(struct work_struct *work)
 		schedule_delayed_work(&mfd->backlight_worker,
 					backlight_duration);
 #endif
-
 }
 
 static int msm_fb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)

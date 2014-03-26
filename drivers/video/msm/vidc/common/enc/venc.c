@@ -218,15 +218,15 @@ static void vid_enc_output_frame_done(struct video_client_ctx *client_ctx,
 
 	switch (event) {
 	case VCD_EVT_RESP_OUTPUT_DONE:
-	   DBG("Send INPUT_DON message to client = %p\n",
+	   DBG("Send OUTPUT_DON message to client = %p\n",
 			client_ctx);
 	   break;
 	case VCD_EVT_RESP_OUTPUT_FLUSHED:
-	   DBG("Send INPUT_FLUSHED message to client = %p\n",
+	   DBG("Send OUTPUT_FLUSHED message to client = %p\n",
 		   client_ctx);
 	   break;
 	default:
-	   ERR("QVD: vid_enc_output_frame_done invalid cmd type: %d\n", event);
+	   ERR("vid_enc_output_frame_done invalid cmd type: %d\n", event);
 	   venc_msg->venc_msg_info.statuscode = VEN_S_EFATAL;
 	   break;
 	}
@@ -624,6 +624,8 @@ static int vid_enc_release(struct inode *inode, struct file *file)
 {
 	struct video_client_ctx *client_ctx = file->private_data;
 	INFO("\n msm_vidc_enc: Inside %s()", __func__);
+	vidc_cleanup_addr_table(client_ctx, BUFFER_TYPE_OUTPUT);
+	vidc_cleanup_addr_table(client_ctx, BUFFER_TYPE_INPUT);
 	vid_enc_close_client(client_ctx);
 	vidc_release_firmware();
 #ifndef USE_RES_TRACKER
@@ -805,8 +807,8 @@ static int __init vid_enc_init(void)
 			goto error_vid_enc_cdev_add;
 		}
 	}
-	vid_enc_vcd_init();
-	return 0;
+	rc = vid_enc_vcd_init();
+	return rc;
 
 error_vid_enc_cdev_add:
 	for (j = i-1; j >= 0; j--)

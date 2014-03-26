@@ -522,13 +522,13 @@ static int sii9234_cbus_reset(struct sii9234_data *sii9234)
 	for (idx = 0; idx < 4; idx++) {
 		/* Enable WRITE_STAT interrupt for writes to all
 				 4 MSC Status registers.*/
-		ret = cbus_write_reg(sii9234, 0xE0 + idx, 0xFF);
+		ret = cbus_write_reg(sii9234, 0xE0 + idx, 0xF2);
 		if (ret < 0)
 			return ret;
 
 		/*Enable SET_INT interrupt for writes to all
 					4 MSC Interrupt registers.*/
-		ret = cbus_write_reg(sii9234, 0xF0 + idx, 0xFF);
+		ret = cbus_write_reg(sii9234, 0xF0 + idx, 0xF2);
 		if (ret < 0)
 			return ret;
 	}

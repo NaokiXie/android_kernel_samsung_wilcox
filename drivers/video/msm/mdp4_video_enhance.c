@@ -38,7 +38,7 @@
 #include "mdp4_video_enhance.h"
 #if defined(CONFIG_FB_MSM_MIPI_SAMSUNG_OLED_VIDEO_WVGA_PT)
 #include "mdp4_video_tuning_golden.h"
-#elif defined(CONFIG_FB_MSM_MIPI_SAMSUNG_TFT_VIDEO_WSVGA_PT_PANEL)
+#elif defined(CONFIG_MACH_LT02_SPR) || defined(CONFIG_MACH_LT02_ATT) || defined(CONFIG_MACH_LT02_CHN_CTC)
 #include "mdp4_video_tuning_lt02.h"
 #else
 #include "mdp4_video_tuning.h"
@@ -815,7 +815,7 @@ static ssize_t playspeed_store(struct device *dev,
 static DEVICE_ATTR(playspeed, 0664,
 			playspeed_show,
 			playspeed_store);
-#if defined(CONFIG_FB_MSM_MIPI_SAMSUNG_TFT_VIDEO_WSVGA_PT_PANEL)
+#if defined(CONFIG_MACH_LT02_SPR) || defined(CONFIG_MACH_LT02_ATT) || defined(CONFIG_MACH_LT02_CHN_CTC)
 
 static ssize_t cabc_show(struct device *dev,
 		struct device_attribute *attr, char *buf)	
@@ -906,7 +906,7 @@ void init_mdnie_class(void)
 		(tune_mdnie_dev, &dev_attr_playspeed) < 0)
 		pr_err("Failed to create device file(%s)!=n",
 		dev_attr_playspeed.attr.name);
-#if defined(CONFIG_FB_MSM_MIPI_SAMSUNG_TFT_VIDEO_WSVGA_PT_PANEL)
+#if defined(CONFIG_MACH_LT02_SPR) || defined(CONFIG_MACH_LT02_ATT) || defined(CONFIG_MACH_LT02_CHN_CTC)
 	if (device_create_file(tune_mdnie_dev, &dev_attr_cabc) < 0) {
 		pr_info("[mipi2lvds:ERROR] device_create_file(%s)\n",\
 			dev_attr_cabc.attr.name);
