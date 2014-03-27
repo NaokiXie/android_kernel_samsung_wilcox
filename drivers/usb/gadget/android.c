@@ -89,7 +89,12 @@
 #include "f_rndis.c"
 #include "rndis.c"
 #endif
+#include "u_ether.c"
 #include "u_bam_data.c"
+#include "f_mbim.c"
+#include "f_qc_ecm.c"
+#include "f_qc_rndis.c"
+#include "u_qc_ether.c"
 #ifdef CONFIG_TARGET_CORE
 #include "f_tcm.c"
 #endif
@@ -200,16 +205,6 @@ static void free_android_config(struct android_dev *dev,
 static char manufacturer_string[256];
 static char product_string[256];
 static char serial_string[256];
-
-#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
-#include "u_ncm.c"
-#else
-#include "f_mbim.c"
-#include "f_qc_ecm.c"
-#include "f_qc_rndis.c"
-#include "u_qc_ether.c"
-#endif
-#include "u_ether.c"
 
 /* String Table */
 static struct usb_string strings_dev[] = {
@@ -1667,10 +1662,7 @@ static int mass_storage_function_init(struct android_usb_function *f,
 	if (!config)
 		return -ENOMEM;
 
-	if (dev->pdata && dev->pdata->cdrom)
-		config->fsg.nluns = dev->pdata->nluns;
-	else
-		config->fsg.nluns = 1;
+	config->fsg.nluns = 1;
 
 	for (i = 0; i < config->fsg.nluns; i++) {
 		name[i] = kasprintf(GFP_KERNEL, "lun%u", i);
